@@ -1,7 +1,9 @@
 #include <stdio.h>
 
 /* A tiny BASIC interpreter */
-
+#include <stdio.h>
+#include <stdarg.h>
+#include <string.h>
 #include "stdio.h"
 #include "setjmp.h"
 #include "math.h"
@@ -15,6 +17,7 @@
 
 
 
+int  cli_get_char(void);
 
 #define DELIMITER  1
 #define VARIABLE  2
@@ -45,32 +48,35 @@ char *prog;  /* holds expression to be analyzed */
 jmp_buf e_buf; /* hold environment for longjmp() */
 
 #define iswhite(x) ((x)==' ' || (x)=='\t')
-struct commands { /* keyword lookup table */
+typedef struct
+{ /* keyword lookup table */
 	char command[20];
 	char tok;
-} table[] = 
+}commands;
+
+commands table[] =
 { /* Commands must be entered lower case */
 #if WITH_PRINT
-    "print", PRINT, /* in this table. */
+		{"print", PRINT}, /* in this table. */
 #endif    
 #if WITH_INPUT
-	"input", INPUT,
+		{"input", INPUT},
 #endif
-	"if", IF,
-	"then", THEN,
+		{"if", IF},
+		{"then", THEN},
 #if WITH_GOTO
-	"goto", GOTO,
+		{"goto", GOTO},
 #endif
-	"for", FOR,
-	"next", NEXT,
-	"to", TO,
+		{"for", FOR},
+		{"next", NEXT},
+		{"to", TO},
 #if WITH_GOSUB
-	"gosub", GOSUB,
+	"gosub", GOSUB},
 #endif
-	"return", RETURN,
-	"end", END,
-	"func",FUNC_DEC,
-	"", END  /* mark end of table */
+	{"return", RETURN},
+	{"end", END},
+	{"func",FUNC_DEC},
+	{"", END}  /* mark end of table */
 };
 
 
@@ -111,14 +117,17 @@ struct var var_table[NUM_VARS];
 
 
 ///  stack related functions
-char *find_label(), *gpop();
+char *find_label(char *s);
+char *gpop(void);
 
-struct for_stack {
+typedef struct {
 	int var; /* counter variable */
 	int target;  /* target value */
 	char *loc;
-} fstack[FOR_NEST]; /* stack for FOR/NEXT loop */
-struct for_stack fpop();
+}  for_stack;
+
+for_stack fstack[FOR_NEST]; /* stack for FOR/NEXT loop */
+for_stack fpop(void);
 
 char *gstack[SUB_NEST];	/* stack for gosub */
 
@@ -130,20 +139,47 @@ IDX_TYPE gtos;  /* index to top of GOSUB stack */
 int do_func(void);
 int  get_token(void);
 void assignment(void);
-void print(), scan_labels(), find_eol(), exec_goto();
-void exec_if(), exec_for(), next(), fpush(), input();
-void gosub();
-int greturn();
-void gpush(), label_init();
-void serror(), get_exp(), putback();
-void level2(), level3(), level4(), level5(), level6(), primitive();
-void unary(), arith();
+
+void print(void);
+void scan_labels(void);
+void find_eol(void);
+void exec_goto(void);
+
+void exec_if(void);
+void exec_for(void);
+void next(void);
+void fpush(for_stack i);
+void input(void);
+void gosub(void);
+int greturn(void);
+void gpush(char *s);
+void label_init(void);
+void serror(int error);
+
+void get_exp(int *result);
+
+void putback(void);
+
+void level2(int *result);
+void level3(int *result);
+void level4(int *result);
+void level5(int *result);
+void level6(int *result);
+void primitive(int *result);
+void unary(char o, int * r);
+void arith(char o, int *r, int *h);
+
 int call_func(char *fname, int *argv, int argc);
 
-int look_up_func(char *s);
+char look_up_func(char *s);
 int parse_prog(char *p);
 int look_up(char *s);
+char isdelim(char c);
+int get_next_label(char *s);
 
+
+
+//#define IMPORT_PRINT_STR 1
 ////////////////////////////
 #if IMPORT_PRINT_STR
 void cli_print_str(char *p)
@@ -214,22 +250,29 @@ return 0;
 
 void do_func_dec()
 {
-char *p;
+  char *p;
+  int idx;
+  
   get_token();
-  strcpy(func_table[func_table_count].name,token);
-  func_table[func_table_count].argc=1;
-  func_table[func_table_count].type=FUNC_INT;
-  p = local_func_arr[local_func_cnt++];
-  func_table[func_table_count].ptr=p;
-  func_table_count++;
-  while (tok!=FINISHED)
+  idx = look_up_func(token);
+  if (idx < 0)
   {
-	  while (iswhite(*prog))
-		  	  {
-		  	  ++prog;  /*keep the spaces */
-			  strcat(p," ");
-		  	  }
+	  idx = func_table_count;
+	  func_table_count++;
+  p = local_func_arr[local_func_cnt++];
+	  func_table[idx].ptr = p;
+  }
+  else
+	  p = func_table[idx].ptr;
+  strcpy(func_table[idx].name, token);
+  func_table[idx].argc = 0;
+  func_table[idx].type = FUNC_INT;
+  while (*prog)
+  {
+	  *p++=*prog++;  /*keep the spaces */
 
+
+//code bellow was commented out at one point
 	  get_token();
 	  strcat(p,token);
   }
@@ -266,9 +309,7 @@ void set_var_idx_val_int(int idx, int value)
 	case VAR_TYPE_INT_PTR:*var_table[idx].value= value;break;
 	}
 }
-void set_var_val_int(s,val)
-char *s;
-int val;
+void set_var_val_int(char *s,int val)
 {
 	char v;
 	v=find_var(s);
@@ -292,8 +333,7 @@ int  get_var_idx_val_int(int idx)
 }
 
 /* Find the value of a variable. */
-int find_var_val(s)
-char *s;
+int find_var_val(char *s)
 {
 	char v;
 	v=find_var(s);
@@ -306,16 +346,13 @@ char *s;
 }
 
 
-int
-
-look_up_func(s)
-char *s;
+char look_up_func(char *s)
 {
 	int val;
 	int args[10];
 	val= call_func(s,args, -1);
 	//printf("Looking for %s %d\n ",s,val);
-	return val;
+	return (char) val;
 }
 #if 0
 look_up_func(s)
@@ -393,7 +430,7 @@ int parse_prog(char *p)
 				 do_func();
 				 break;
 			case END:
-				exit(0);
+				 return 1;
 			case FUNC_DEC:
 				 do_func_dec();
 		}
@@ -441,7 +478,7 @@ void assignment(void)
 int do_func(void)
 {
 		int answer;
-		int len = 0, spaces;
+		int len = 0;
 		int fn;
 		int argc=0;
 		int argv[MAX_ARGS];
@@ -490,7 +527,7 @@ int do_func(void)
 
 /* Execute a simple version of the BASIC PRINT statement */
 #if WITH_PRINT
-void print()
+void print(void)
 {
 	int answer;
 	int len = 0, spaces;
@@ -535,7 +572,7 @@ void print()
 #endif
 
 /* Find all labels. */
-void scan_labels()
+void scan_labels(void)
 {
 	int addr;
 	char *temp;
@@ -545,7 +582,7 @@ void scan_labels()
 
 	/* if the first token in the file is a label */
 	get_token();
-	if (token_type == NUMBER) {
+	if (token_type == NUMBER || (token_type == LABEL)) {
 		strcpy(label_table[0].name, token);
 		label_table[0].p = prog;
 	}
@@ -568,7 +605,7 @@ void scan_labels()
 }
 
 /* Find the start of the next line. */
-void find_eol()
+void find_eol(void)
 {
 	while (*prog != '\n'  && *prog != '\0'&& *prog != '|') ++prog;
 	if (*prog) prog++;
@@ -578,8 +615,7 @@ void find_eol()
 A -1 is returned if the array is full.
 A -2 is returned when duplicate label is found.
 */
-get_next_label(s)
-char *s;
+int get_next_label(char *s)
 {
 	register int t;
 
@@ -595,8 +631,7 @@ char *s;
 label is not found; otherwise a pointer to the position
 of the label is returned.
 */
-char *find_label(s)
-char *s;
+char *find_label(char *s)
 {
 	register int t;
 
@@ -606,7 +641,7 @@ char *s;
 }
 
 /* Execute a GOTO statement. */
-void exec_goto()
+void exec_goto(void)
 {
 
 	char *loc;
@@ -624,7 +659,7 @@ void exec_goto()
 By convention, a null label name indicates that
 array position is unused.
 */
-void label_init()
+void label_init(void)
 {
 	register int t;
 
@@ -632,7 +667,7 @@ void label_init()
 }
 
 /* Execute an IF statement. */
-void exec_if()
+void exec_if(void)
 {
 	int x, y, cond;
 	char op;
@@ -672,9 +707,9 @@ void exec_if()
 }
 
 /* Execute a FOR loop. */
-void exec_for()
+void exec_for(void)
 {
-	struct for_stack i;
+	for_stack i;
 	int value;
 
 	get_token(); /* read the control variable */
@@ -715,9 +750,9 @@ void exec_for()
 }
 
 /* Execute a NEXT statement. */
-void next()
+void next(void)
 {
-	struct for_stack i;
+	for_stack i;
 
 	i = fpop(); /* read the loop info */
 
@@ -730,8 +765,8 @@ void next()
 }
 
 /* Push function for the FOR stack. */
-void fpush(i)
-struct for_stack i;
+void fpush( for_stack i)
+
 {
 	if (ftos>FOR_NEST)
 		serror(10);
@@ -740,7 +775,7 @@ struct for_stack i;
 	ftos++;
 }
 
-struct for_stack fpop()
+for_stack fpop(void)
 {
 	ftos--;
 	if (ftos<0) serror(11);
@@ -774,7 +809,7 @@ void input()
 
 #if WITH_GOSUB
 /* Execute a GOSUB command. */
-void gosub()
+void gosub(void)
 {
 	char *loc;
 
@@ -792,7 +827,7 @@ void gosub()
 #endif
 
 /* Return from GOSUB. */
-int greturn()
+int greturn(void)
 {
 	int answer;
 	get_exp(&answer);
@@ -802,8 +837,7 @@ int greturn()
 }
 
 /* GOSUB stack push function. */
-void gpush(s)
-char *s;
+void gpush(char *s)
 {
 	gtos++;
 
@@ -817,7 +851,7 @@ char *s;
 }
 
 /* GOSUB stack pop function. */
-char *gpop()
+char *gpop(void)
 {
 	if (gtos == 0) {
 		serror(13);
@@ -828,8 +862,7 @@ char *gpop()
 }
 
 /* Entry point into parser. */
-void get_exp(result)
-int *result;
+void get_exp(int *result)
 {
 	get_token();
 	if (!*token) {
@@ -842,8 +875,7 @@ int *result;
 
 
 /* display an error message */
-void serror(error)
-int error;
+void serror(int error)
 {
 #if WITH_LONG_ERROR
     static char *e[] = {
@@ -905,7 +937,7 @@ int  get_token(void)
 		return (token_type = DELIMITER);
 	}
 
-	if (strchr("+-*^/%=;(),><", *prog)){ /* delimiter */
+	if (strchr("+-*^/%=;(),><:", *prog)){ /* delimiter */
 		*temp = *prog;
 		prog++; /* advance to next position */
 		temp++;
@@ -938,9 +970,13 @@ int  get_token(void)
 	/* see if a string is a command or a variable */
 	if (token_type == STRING) {
 		if (*prog == ':')
+		{
+			prog++;
+			token_type = LABEL;
 			return LABEL;
+		}
 		tok = look_up_func(token);
-		if (tok)
+		if (tok>=0)
 		   {
 		    token_type = FUNC;
 		    tok = FUNC;
@@ -951,13 +987,20 @@ int  get_token(void)
 		else token_type = COMMAND; /* is a command */
 	}
     
+    if (token_type==0)
+       {
+        prog++; /* advance to next position */
+	    temp++;
+	    *temp = 0;
+	    return (token_type = DELIMITER);
+        }
 	return token_type;
 }
 
 
 
 /* Return a token to input stream. */
-void putback()
+void putback(void)
 {
 
 	char *t;
@@ -969,8 +1012,7 @@ void putback()
 /* Look up a a token's internal representation in the
 token table.
 */
-int look_up(s)
-char *s;
+int look_up(char *s)
 {
 	register int i;
 	char *p;
@@ -986,8 +1028,7 @@ char *s;
 }
 
 /* Return true if c is a delimiter. */
-isdelim(c)
-char c;
+char isdelim(char c)
 {
 	if (strchr(" ;,+-<>/*%^=()|:", c) || c == 9 || c == '\r' || c == 0)
 		return 1;
@@ -995,8 +1036,7 @@ char c;
 }
 
 /* Return 1 if c is space or tab. */
-iswhite2(c)
-char c;
+char iswhite2(char c)
 {
 	if (c == ' ' || c == '\t') return 1;
 	else return 0;
@@ -1005,8 +1045,7 @@ char c;
 
 
 /*  Add or subtract two terms. */
-void level2(result)
-int *result;
+void level2(int *result)
 {
 	register char  op;
 	int hold;
@@ -1020,8 +1059,7 @@ int *result;
 }
 
 /* Multiply or divide two factors. */
-void level3(result)
-int *result;
+void level3(int *result)
 {
 	register char  op;
 	int hold;
@@ -1035,8 +1073,7 @@ int *result;
 }
 
 /* Process integer exponent. */
-void level4(result)
-int *result;
+void level4(int *result)
 {
 	int hold;
 
@@ -1049,8 +1086,7 @@ int *result;
 }
 
 /* Is a unary + or -. */
-void level5(result)
-int *result;
+void level5(int *result)
 {
 	register char  op;
 
@@ -1066,8 +1102,7 @@ int *result;
 }
 
 /* Process parenthesized expression. */
-void level6(result)
-int *result;
+void level6(int * result)
 {
 	if ((*token == '(') && (token_type == DELIMITER)) {
 		get_token();
@@ -1081,8 +1116,7 @@ int *result;
 }
 
 /* Find value of number or variable. */
-void primitive(result)
-int *result;
+void primitive(int *result)
 {
 
 	switch (token_type) {
@@ -1091,7 +1125,8 @@ int *result;
 		get_token();
 		return;
 	case NUMBER:
-		*result = atoi(token);
+		*result = strtol (token,NULL, 0);
+				//atoi(token);
 		get_token();
 		return;
 	case FUNC:
@@ -1104,9 +1139,7 @@ int *result;
 }
 
 /* Perform the specified arithmetic. */
-void arith(o, r, h)
-char o;
-int *r, *h;
+void arith(char o, int *r, int *h)
 {
 	register int t, ex;
 
@@ -1139,16 +1172,37 @@ int *r, *h;
 }
 
 /* Reverse the sign. */
-void unary(o, r)
-char o;
-int *r;
+void unary(char o, int * r)
 {
 	if (o == '-') *r = -(*r);
 }
 
 
 
+#define MAX_ALL 2048
+void save_all(void)
+{
+ char all[MAX_ALL];
+ int c;
+ char temp[80];
 
+ for (c=0; c < var_count;c++)
+	{
+        if (func_table[c].type==FUNC_INT)
+            {
+            sprintf (temp,"%s |%s\n",func_table[c].name,func_table[c].ptr);
+		    strcat(all,temp);
+            }
+	}
+	for (c=0; c < var_count;c++)
+	{
+        if (var_table[c].type==VAR_TYPE_INT_LOC)
+            {
+            sprintf (temp,"%s=%d\n",var_table[c].name,(int)var_table[c].value);
+		    strcat(all,temp);
+            }
+	}
+}
 
 int listv(void)
 {
@@ -1156,9 +1210,9 @@ int listv(void)
     char temp[80];
 	for (c=0; c < var_count;c++)
 	{
-		sprintf (temp,"%d %s %d %d\n",c,var_table[c].name,var_table[c].type,(int)var_table[c].value);
+		sprintf (temp,"%d %s %d %d \n",c,var_table[c].name,var_table[c].type,(int)var_table[c].value);
+	    cli_print_str(temp);
 	}
-    cli_print_str(temp);
 
 	return c;
 }
@@ -1170,8 +1224,35 @@ int listf(void)
 	for (c=0;c<func_table_count;c++)
 	{
 		sprintf (temp,"%14s(%d) %s\n",func_table[c].name,func_table[c].argc,(func_table[c].type==FUNC_INT)?func_table[c].ptr:"LINKED");
+		cli_print_str(temp);
 	}
+ return 0;
+}
+
+void menu(void)
+{
+	int c;
+	int i;
+	int argv;
+    char temp[80];
+while(1)
+{
+	for (c=0;c<func_table_count;c++)
+	{
+		sprintf (temp,"%2d %14s\n",c,func_table[c].name);
+		cli_print_str(temp);
+	}
+ c = cli_get_char();
+ if (c>='0' && c<(func_table_count+'0'))
+	 {
+	 c=c-'0';
+	 sprintf (temp,"Exec %s\n",func_table[c].name);
     cli_print_str(temp);
+	 evaluate_func(func_table[c].name, &argv,0);
+	 }
+ else
+	 break;
+}
  return 0;
 }
 int g_test=10;
@@ -1179,12 +1260,4 @@ int g_test=10;
 
 
 
-int main1(void)
-{
-	call_func("", NULL, -2);
-	BLINK_VAR_INT(g_test);
-	ftos = 0; /* initialize the FOR stack index */
-	gtos = 0; /* initialize the GOSUB stack index */
-    return 0;
-}
 
