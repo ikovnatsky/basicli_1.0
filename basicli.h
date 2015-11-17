@@ -3,12 +3,12 @@
 #define FOR_NEST 5
 #define SUB_NEST 5
 #define FUNC_NAME_LEN 20  //char length of a function name
-#define NUM_FUNCS         // number of allowable functions
+#define NUM_FUNCS    20    // number of allowable functions
 #define MAX_TOKEN  80   // char length of a single token
 #define NUM_VARS 10     // total number of variable (local + linked)
 #define MAX_LINK_STRING 80  // this is the maximum string length that will passed to a C function
 
-#define LOCAL_FUNC_NUM 10
+#define LOCAL_FUNC_NUM 20
 #define LOCAL_FUN_SIZE 255
 
 /////// structures used for function calls
@@ -29,7 +29,7 @@ struct func {
 #define BLINK_VAR_INT(v)  strcpy(var_table[var_count].name,#v);var_table[var_count].type = VAR_TYPE_INT_PTR;var_table[var_count++].value = &v;
 
 
-#define BLINK_START int call_func(char *fname, int *argv, int argc) {int inarg=0; int fcnt=0; int ret_val;
+#define BLINK_START int call_func(char *fname, int *argv, int argc) {int inarg=0; int fcnt=0; int ret_val=-1;
 #define INT_BLINK(F,c)  \
 		if (argc==-2) \
 			{\
@@ -71,7 +71,7 @@ struct func {
 
 #define BLINK_END if (argc==-2) func_table_count=fcnt;\
 					else while (fcnt!=func_table_count){if(strcmp(func_table[fcnt].name,fname)==0) return fcnt;fcnt++;}\
-					return 0;}
+					return -1;}
 
 #define BLINKINT     argv[inarg++]
 #define BLINKSTRING  ((char*)argv[inarg++])
@@ -81,7 +81,12 @@ extern IDX_TYPE func_table_count;
 
 extern struct func func_table[NUM_FUNCS];
 
-char local_func_arr[LOCAL_FUNC_NUM][LOCAL_FUN_SIZE];
+extern char local_func_arr[LOCAL_FUNC_NUM][LOCAL_FUN_SIZE];
+
+extern IDX_TYPE ftos;  /* index to top of FOR stack */
+extern IDX_TYPE gtos;  /* index to top of GOSUB stack */
+
+
 
                 
 int listv(void);
@@ -101,3 +106,4 @@ int listf(void);
 
 void cli_print_str(char *p);
 int cli_print_int(int i);
+int basicli_init(void);
